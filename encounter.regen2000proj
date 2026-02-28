@@ -34,6 +34,18 @@
     },
     {
       "start": 8997,
+      "end": 19754,
+      "type_": "Code",
+      "collapsed": false
+    },
+    {
+      "start": 19755,
+      "end": 19980,
+      "type_": "Undefined",
+      "collapsed": false
+    },
+    {
+      "start": 19981,
       "end": 20260,
       "type_": "Code",
       "collapsed": false
@@ -64,7 +76,16 @@
     "11022": "eight frequency bytes of 'saucer move' sfx",
     "11028": "last 2 frequencies; for some reason a loop ends here",
     "11030": "end of sfx marker?",
-    "11045": "end of sfx marker?"
+    "11045": "end of sfx marker?",
+    "19987": "Y = loop-point index (0 = sound inactive)",
+    "19989": "if Y=0, sound not active — skip write",
+    "19991": "advance position counter",
+    "19993": "X = current position in table",
+    "19995": "load next frequency byte from $80A0+X",
+    "19998": "non-zero → write to SID; zero → end of table, loop back",
+    "20000": "reset position to loop-point (Y)",
+    "20002": "reload from loop-point position",
+    "20005": "write frequency high byte to SID Voice 3"
   },
   "user_line_comments": {
     "2049": "BASIC stub: one empty line (line 1001). Next-line pointer skips $0806-$080F entirely.",
@@ -72,7 +93,8 @@
     "2066": "==============================================================================\nmain entrypoint! SYS 2066 $08012\n==============================================================================",
     "11016": "start of sfx marker?",
     "11021": "end of sfx?",
-    "11022": "==============================================================================\nsfx: saucer move\n=============================================================================="
+    "11022": "==============================================================================\nsfx: saucer move\n==============================================================================",
+    "19987": "SFX PLAYBACK ENGINE — Voice 3\nReads frequency bytes from runtime table at $80A0 (copied from file at startup).\nTable is zero-terminated; loop-point index held in $0048."
   },
   "settings": {
     "all_labels": false,
@@ -92,11 +114,11 @@
   },
   "immediate_value_formats": {},
   "bookmarks": {},
-  "cursor_address": 11016,
-  "hex_dump_cursor_address": 11008,
+  "cursor_address": 20005,
+  "hex_dump_cursor_address": 19984,
   "sprites_cursor_address": 2176,
   "charset_cursor_address": 2048,
-  "right_pane_visible": "HexDump",
+  "right_pane_visible": "None",
   "sprite_multicolor_mode": false,
   "charset_multicolor_mode": false,
   "bitmap_cursor_address": 16384,

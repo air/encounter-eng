@@ -1,5 +1,11 @@
 # Encounter C64 — Reverse Engineering Notes
 
+# Aaron's notes
+- marking up the PRG is not helpful since it gets expanded into memory elsewhere.
+- next step: ditch Regenerator and move to a full RAM debugger
+- question: what is a good program to annotate all the locations?
+- what does Martin Piper use?
+
 ## Memory Map
 
 | Address | Contents |
@@ -36,11 +42,54 @@ $4E25  sta $d40f      ; write to SID Voice 3 freq high byte
 Key behaviours:
 - **Zero-terminated** — a `$00` byte in the table signals end-of-effect
 - **Loop point** — stored in Y before the routine runs; when `$00` is hit, position resets to Y and continues looping from there
-- **Runtime address** — `$80A0` is not in the loaded file. Data is copied there from the file at startup (copy routine not yet found)
+- **Initial trigger** — sets position counter (`a49`) to `loop_point - 1`; first `inc` brings it to `loop_point`, so the first byte played is `$80A0 + loop_point`
+
+### How Sound Data Gets to $80A0
+
+There is **no separate copy routine**. The depacker at `$0340–$036F` (running in the tape buffer) decompresses ALL game data — code, tables, and sound effects — directly to their final runtime addresses in one pass. The sound table lands at `$80A0` simply because that's where the depacker writes it.
+
+Confirmed by watchpoint on write to `$80A0`: hit at `$0360: STA ($FE),Y` with `$FE/$FF = $9D $80`, `Y = $03` — the depacker's own store instruction, mid-decompression.
+
+### Runtime Sound Table Structure (`$80A0`)
+
+The table is a **flat byte array**, indexed directly by Y (the loop-point). Y=0 is hardwired as "inactive" (BEQ guard at engine entry). The first byte at `$80A0` is always `$00` to serve as that sentinel. All other loop-point values are byte offsets into the table hardcoded by the game.
+
+The block decompressed by the depacker starts at `$809D` (3 zero bytes precede `$80A0`).
+
+Table ends at `$8100` (confirmed: `$8100–$811F` are all zero). Data from `$8120` onward is a different structure (alternating `$80/$81` pairs, then address-like bytes — probably display or object tables).
+
+#### Confirmed sound effects
+
+| Loop pt Y | Runtime addr | Bytes | Hz sequence | Shape |
+|-----------|-------------|-------|-------------|-------|
+| Y=1 | `$80A1` | `40 30 20 30` | 976→720→464→720 | V-sweep ("saucer wait") |
+| Y=$10 | `$80B0` | `40 38 30 28 20 28 30 38` | 976→848→720→592→464→592→720→848 | U-sweep ("saucer move") |
+
+#### Probable single-note effects (`$80D0–$80FF`)
+
+Each is one frequency byte immediately followed by `$00` — plays a constant repeating tone. Loop point Y = the offset of that byte.
+
+| Loop pt Y | Addr  | Byte | Hz   |
+|-----------|-------|------|------|
+| Y=$30 | `$80D0` | `$C0` | 3024 |
+| Y=$38 | `$80D8` | `$80` | 2000 |
+| Y=$40 | `$80E0` | `$40` |  976 |
+| Y=$48 | `$80E8` | `$20` |  464 |
+| Y=$50 | `$80F0` | `$10` |  208 |
+| Y=$58 | `$80F8` | `$08` |   80 |
+| Y=$5F | `$80FF` | `$0F` |  192 |
+
+These form a descending pitch bank — likely used for hit/explosion/event sounds where the game just picks a note.
+
+#### Ambiguous region (`$80C0–$80CF`)
+
+`01 01 01 01 01 00 01 00 00 08 FF 00 00 00 F0 F0`
+
+Freq `$01` = −32 Hz under the formula (sub-audible). This region may belong to the noise or bit-shift voice paths rather than the table-driven engine. Needs gameplay observation to resolve — watch what Y values are actually written to the loop-point variable during play.
 
 ### File vs Runtime Addresses
 
-Sound effect data is stored in the file around `$2B0E`. At startup the game copies it to `$80A0` in RAM. A previous investigation found data at `$80B0` — that is `$80A0 + $10`, an indexed offset into the same runtime table. Both observations are consistent.
+The Regenerator disassembly addresses (e.g. `$4E13` for the playback routine, `$2B0E` for sound data) are **file offsets in the compressed PRG**, not runtime addresses. After decompression the runtime layout is different. Confirmed: checking `$4E10` in live RAM shows non-code bytes. Runtime PC during gameplay observed at `$9E31`.
 
 ### Frequency Formula
 
@@ -85,6 +134,7 @@ Preview tool: `sfx-preview.html` (open in browser).
 
 ## Open Questions
 
-- Where is the copy routine that moves sound data from `$2B0E` (file) to `$80A0` (runtime)?
-- What is the full structure of the sound effect table region starting at `$2B0E`?
-- How is the loop-point index (loaded into Y at `$4E13`) set before the routine runs?
+- ~~Where is the copy routine that moves sound data from `$2B0E` (file) to `$80A0` (runtime)?~~ **Answered**: the depacker IS the mechanism — no separate copy.
+- What is the full set of sound effects? V-sweep (Y=1) and saucer move (Y=$10) confirmed. Seven probable single-note effects at Y=$30–$5F. Region Y=$20 (`$80C0`) ambiguous — needs gameplay observation of actual Y values used.
+- How is the loop-point index (Y) set before the playback routine runs? (What triggers a sound and sets `e0048`/Y?)
+- Regenerator file addresses (`$4E13`, `$2B0E`, etc.) don't match runtime layout. What are the true runtime addresses for the sound engine and other key routines?

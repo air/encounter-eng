@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Encounter C64 — SFX Preview</title>
+  <style>
+    body { font-family: monospace; padding: 2rem; background: #1a1a1a; color: #e0e0e0; max-width: 640px; }
+    h2   { color: #aaa; margin-bottom: 1.5rem; }
+    label { display: block; color: #888; margin-bottom: 0.25rem; font-size: 0.85rem; }
+    textarea, input[type=text], input[type=number] {
+      background: #2a2a2a; color: #e0e0e0; border: 1px solid #555;
+      font-family: monospace; padding: 0.4rem 0.6rem; width: 100%; box-sizing: border-box;
+    }
+    textarea { height: 5rem; resize: vertical; }
+    .params  { display: flex; gap: 1rem; margin: 1rem 0; }
+    .params > div { flex: 1; }
+    .error   { color: #e06060; font-size: 0.85rem; margin-top: 0.25rem; min-height: 1.2em; }
+    table    { border-collapse: collapse; margin: 1rem 0; width: 100%; }
+    td, th   { padding: 0.25rem 0.75rem; text-align: right; border: 1px solid #333; }
+    th       { color: #666; font-weight: normal; }
+    .controls { margin-top: 0.5rem; display: flex; align-items: center; gap: 1rem; }
+    button   { padding: 0.5rem 1.5rem; font-size: 1rem; font-family: monospace;
+               background: #333; color: #e0e0e0; border: 1px solid #666; cursor: pointer; }
+    button:hover  { background: #444; }
+    button:active { background: #555; }
+    button:disabled { opacity: 0.4; cursor: default; }
+  </style>
+</head>
+<body>
+  <h2>Encounter C64 — SFX Preview</h2>
+
+  <label>Bytes (paste from Regenerator — any format)</label>
+  <textarea id="input" spellcheck="false">40 38 30 28 20 28 30 38</textarea>
+  <div class="error" id="error"></div>
+
+  <div class="params">
+    <div>
+      <label>ms per byte</label>
+      <input type="number" id="ms" value="22" min="1" max="2000">
+    </div>
+    <div>
+      <label>freq = offset + (scale × byte)</label>
+      <input type="number" id="offset" value="-48" style="width:48%;box-sizing:border-box">
+      <input type="number" id="scale"  value="16"  style="width:48%;box-sizing:border-box">
+    </div>
+    <div>
+      <label>waveform</label>
+      <select id="wave" style="background:#2a2a2a;color:#e0e0e0;border:1px solid #555;padding:0.4rem;width:100%;font-family:monospace">
+        <option value="triangle" selected>triangle</option>
+        <option value="square">square</option>
+        <option value="sawtooth">sawtooth</option>
+        <option value="sine">sine</option>
+      </select>
+    </div>
+  </div>
+
+  <table>
+    <thead><tr><th>#</th><th>hex</th><th>dec</th><th>freq (hz)</th></tr></thead>
+    <tbody id="tbody"></tbody>
+  </table>
+
+  <div class="controls">
+    <button id="play" disabled>▶ Play</button>
+    <label style="display:inline;color:#aaa"><input type="checkbox" id="loop"> loop</label>
+  </div>
+
+  <script>
+    let parsedBytes = [];
+    let loopCtx     = null;
+
+    const inputEl  = document.getElementById('input');
+    const errorEl  = document.getElementById('error');
+    const tbodyEl  = document.getElementById('tbody');
+    const playBtn  = document.getElementById('play');
+    const loopChk  = document.getElementById('loop');
+    const msEl     = document.getElementById('ms');
+    const offsetEl = document.getElementById('offset');
+    const scaleEl  = document.getElementById('scale');
+    const waveEl   = document.getElementById('wave');
+
+    function byteToFreq(b) {
+      return parseFloat(offsetEl.value) + parseFloat(scaleEl.value) * b;
+    }
+
+    function parseBytes(raw) {
+      // extract all hex byte tokens: $XX, 0xXX, or bare XX
+      const tokens = raw.match(/(?:0x|\$)?([0-9a-fA-F]{2})\b/g);
+      if (!tokens || tokens.length === 0) return null;
+      return tokens.map(t => parseInt(t.replace(/^(0x|\$)/, ''), 16));
+    }
+
+    function refreshTable() {
+      tbodyEl.innerHTML = '';
+      parsedBytes.forEach((b, i) => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td>${i}</td>`
+                     + `<td>$${b.toString(16).padStart(2,'0').toUpperCase()}</td>`
+                     + `<td>${b}</td>`
+                     + `<td>${byteToFreq(b).toFixed(1)}</td>`;
+        tbodyEl.appendChild(tr);
+      });
+    }
+
+    function parseAndRefresh() {
+      const bytes = parseBytes(inputEl.value);
+      if (!bytes) {
+        errorEl.textContent = 'No valid hex bytes found.';
+        parsedBytes = [];
+        playBtn.disabled = true;
+        tbodyEl.innerHTML = '';
+        return;
+      }
+      errorEl.textContent = '';
+      parsedBytes = bytes;
+      playBtn.disabled = false;
+      refreshTable();
+    }
+
+    function scheduleBytes(ctx, osc, bytes, startTime) {
+      const step = parseFloat(msEl.value) / 1000;
+      bytes.forEach((b, i) => {
+        osc.frequency.setValueAtTime(byteToFreq(b), startTime + i * step);
+      });
+      return step * bytes.length;
+    }
+
+    function buildGraph(ctx) {
+      const osc  = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = waveEl.value;
+      gain.gain.value = 0.3;
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      return { osc, gain };
+    }
+
+    function stopLoop() {
+      if (loopCtx) { loopCtx.close(); loopCtx = null; }
+      playBtn.textContent = '▶ Play';
+    }
+
+    playBtn.addEventListener('click', () => {
+      if (loopCtx) { stopLoop(); return; }
+
+      if (loopChk.checked) {
+        loopCtx = new AudioContext();
+        const { osc } = buildGraph(loopCtx);
+        const step     = parseFloat(msEl.value) / 1000;
+        const duration = parsedBytes.length * step;
+        const REPS     = 300;
+        for (let r = 0; r < REPS; r++) {
+          scheduleBytes(loopCtx, osc, parsedBytes, loopCtx.currentTime + r * duration);
+        }
+        osc.start(loopCtx.currentTime);
+        playBtn.textContent = '■ Stop';
+      } else {
+        const ctx    = new AudioContext();
+        const { osc } = buildGraph(ctx);
+        const dur    = scheduleBytes(ctx, osc, parsedBytes, ctx.currentTime);
+        osc.start(ctx.currentTime);
+        osc.stop(ctx.currentTime + dur);
+      }
+    });
+
+    [inputEl, msEl, offsetEl, scaleEl, waveEl].forEach(el => {
+      el.addEventListener('input', () => { stopLoop(); parseAndRefresh(); });
+    });
+
+    parseAndRefresh();
+  </script>
+</body>
+</html>
